@@ -286,18 +286,21 @@ static int moq_write_packet(AVFormatContext *s, AVPacket *pkt)
     MOQContext *moq = s->priv_data;
     AVStream *st = s->streams[pkt->stream_index];
 
+    int64_t dts_microseconds = av_rescale_q(pkt->dts, st->time_base, (AVRational){1, 1000000});
+
     if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-        // TODO: dts needs to be usec
-        // av_log(moq, AV_LOG_ERROR, "joy %d %lld %d\n", pkt->flags & AV_PKT_FLAG_KEY, pkt->dts * 100000, pkt->size);
         if (pkt->flags & AV_PKT_FLAG_KEY) {
             if ((ret = h264_annexb_insert_sps_pps(s, pkt)) < 0) {
                 av_log(moq, AV_LOG_ERROR, "Failed to insert SPS/PPS before IDR\n");
                 goto end;
             }
         }
-		hang_write_video_packet_from_c(pkt->data, pkt->size, pkt->flags & AV_PKT_FLAG_KEY, pkt->dts * 100000);
+
+        // av_log(moq, AV_LOG_ERROR, "joy %d %lld %d\n", pkt->flags & AV_PKT_FLAG_KEY, dts_microseconds, pkt->size);
+        
+		hang_write_video_packet_from_c(pkt->data, pkt->size, pkt->flags & AV_PKT_FLAG_KEY, dts_microseconds);
 	} else {
-		hang_write_audio_packet_from_c(pkt->data, pkt->size, pkt->dts * 100000);
+		hang_write_audio_packet_from_c(pkt->data, pkt->size, dts_microseconds);
 	}
 
 end:
