@@ -122,11 +122,6 @@ static int parse_codec(AVFormatContext *s)
                 return AVERROR_PATCHWELCOME;
             }
 
-            if (par->video_delay > 0) {
-                av_log(moq, AV_LOG_ERROR, "Unsupported B frames by MoQ\n");
-                return AVERROR_PATCHWELCOME;
-            }
-
             break;
         case AVMEDIA_TYPE_AUDIO:
             if (moq->audio_par) {
@@ -286,7 +281,11 @@ static int moq_write_packet(AVFormatContext *s, AVPacket *pkt)
     MOQContext *moq = s->priv_data;
     AVStream *st = s->streams[pkt->stream_index];
 
-    int64_t dts_microseconds = av_rescale_q(pkt->dts, st->time_base, (AVRational){1, 1000000});
+    int64_t pts_microseconds = av_rescale_q(pkt->pts, st->time_base, (AVRational){1, 1000000});
+
+    // int64_t start_time = av_gettime();
+
+    // av_log(moq, AV_LOG_ERROR, "joy start %lld\n", start_time);
 
     if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
         if (pkt->flags & AV_PKT_FLAG_KEY) {
@@ -296,12 +295,12 @@ static int moq_write_packet(AVFormatContext *s, AVPacket *pkt)
             }
         }
 
-        // av_log(moq, AV_LOG_ERROR, "joy %d %lld %d\n", pkt->flags & AV_PKT_FLAG_KEY, dts_microseconds, pkt->size);
-        
-		hang_write_video_packet_from_c(pkt->data, pkt->size, pkt->flags & AV_PKT_FLAG_KEY, dts_microseconds);
+		hang_write_video_packet_from_c(pkt->data, pkt->size, pkt->flags & AV_PKT_FLAG_KEY, pts_microseconds);
 	} else {
-		hang_write_audio_packet_from_c(pkt->data, pkt->size, dts_microseconds);
+		hang_write_audio_packet_from_c(pkt->data, pkt->size, pts_microseconds);
 	}
+
+    // av_log(moq, AV_LOG_ERROR, "joy end %d\n\n", ELAPSED(start_time, av_gettime()));
 
 end:
     if (ret < 0 && moq->state < MOQ_STATE_FAILED)
