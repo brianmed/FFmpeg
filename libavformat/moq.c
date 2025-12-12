@@ -37,13 +37,12 @@
 #include "nal.h"
 #include "avio_internal.h"
 #include "http.h"
-#include "hang.h"
+#include "moq.h"
 #include "internal.h"
 #include "mux.h"
 #include "network.h"
 #include "srtp.h"
 #include "tls.h"
-
 
 /* Calculate the elapsed time from starttime to endtime in milliseconds. */
 #define ELAPSED(starttime, endtime) ((int)(endtime - starttime) / 1000)
@@ -173,16 +172,16 @@ static int moq_start(AVFormatContext *s)
     int ret = 0;
     MOQContext *moq = s->priv_data;
 
-    moq->broadcast = hang_broadcast_create();
+    moq->broadcast = moq_broadcast_create();
 
-    moq->session = hang_session_connect(s->url, session_status_callback, s->priv_data);
+    moq->session = moq_session_connect(s->url, session_status_callback, s->priv_data);
     if (moq->session < 0) {
         ret = -1;
         moq->state = MOQ_STATE_FAILED;
         goto end;
     }
 
-	ret = hang_broadcast_publish(moq->broadcast, moq->session, moq->path);
+	ret = moq_broadcast_publish(moq->broadcast, moq->session, moq->path);
 	if (ret < 0) {
         moq->state = MOQ_STATE_FAILED;
         av_log(moq, AV_LOG_VERBOSE, "MoQ failed to publish broadcast to session=%d, elapsed=%dms\n",
@@ -191,7 +190,7 @@ static int moq_start(AVFormatContext *s)
     }
 
     if (moq->video_par) {
-	    moq->video = hang_track_create(moq->broadcast, "h264");
+	    moq->video = moq_track_create(moq->broadcast, "h264", moq->video_par->extradata, moq->video_par->extradata_size);
 
         if (moq->video < 0) {
             moq->state = MOQ_STATE_FAILED;
@@ -199,33 +198,15 @@ static int moq_start(AVFormatContext *s)
                 moq->session, ELAPSED(moq->moq_starttime, av_gettime()));
             goto end;
         }
-
-	    ret = hang_track_init(moq->video, moq->video_par->extradata, moq->video_par->extradata_size);
-
-        if (ret < 0) {
-            moq->state = MOQ_STATE_FAILED;
-            av_log(moq, AV_LOG_VERBOSE, "MoQ failed to init video to session=%d, elapsed=%dms\n",
-                moq->session, ELAPSED(moq->moq_starttime, av_gettime()));
-            goto end;
-        }
     }
 
     if (moq->audio_par) {
-        moq->audio = hang_track_create(moq->broadcast, "aac");
+        moq->audio = moq_track_create(moq->broadcast, "aac", moq->audio_par->extradata, moq->audio_par->extradata_size > 2 ? 2 : moq->audio_par->extradata_size);
 
         if (moq->audio < 0) {
             moq->state = MOQ_STATE_FAILED;
             av_log(moq, AV_LOG_VERBOSE, "MoQ failed to create audio for session=%d, elapsed=%dms\n",
                 moq->session, ELAPSED(moq->moq_starttime, av_gettime()));
-            goto end;
-        }
-
-	    ret = hang_track_init(moq->audio, moq->audio_par->extradata, moq->audio_par->extradata_size > 2 ? 2 : moq->audio_par->extradata_size);
-
-        if (ret < 0) {
-            moq->state = MOQ_STATE_FAILED;
-            av_log(moq, AV_LOG_VERBOSE, "MoQ failed [%d] to init audio to session=%d [%d], elapsed=%dms\n",
-                moq->audio_par->extradata_size, moq->session, moq->audio, ELAPSED(moq->moq_starttime, av_gettime()));
             goto end;
         }
     }
@@ -356,6 +337,12 @@ static int moq_write_packet(AVFormatContext *s, AVPacket *pkt)
 
     int64_t start_time = av_gettime();
 
+    static int64_t first_pts_time = 0;
+
+    if (first_pts_time == 0) {
+        first_pts_time = start_time;
+    }
+
     // av_log(moq, AV_LOG_ERROR, "joy start %lld\n", start_time);
 
     if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
@@ -366,9 +353,11 @@ static int moq_write_packet(AVFormatContext *s, AVPacket *pkt)
             }
         }
 
-	    ret = hang_track_write(moq->video, pkt->data, pkt->size, pts_microseconds);
+	    ret = moq_track_write(moq->video, pkt->data, pkt->size, pts_microseconds);
 	} else {
-		ret = hang_track_write(moq->audio, pkt->data, pkt->size, pts_microseconds);
+        // av_log(moq, AV_LOG_VERBOSE, "audio %lld %lld %lld\n", start_time, first_pts_time + pts_microseconds, start_time - (first_pts_time + pts_microseconds));
+
+		ret = moq_track_write(moq->audio, pkt->data, pkt->size, pts_microseconds);
 	}
 
     // av_log(moq, AV_LOG_ERROR, "joy end %d\n\n", ELAPSED(start_time, av_gettime()));
@@ -394,9 +383,9 @@ static av_cold void moq_deinit(AVFormatContext *s)
         s->streams[i]->priv_data = NULL;
     }
 
-	hang_session_close(moq->session);
-	hang_track_close(moq->video);
-	hang_track_close(moq->audio);
+	moq_session_close(moq->session);
+	moq_track_close(moq->video);
+	moq_track_close(moq->audio);
 }
 
 static int moq_check_bitstream(AVFormatContext *s, AVStream *st, const AVPacket *pkt)
@@ -433,7 +422,7 @@ static const AVClass moq_muxer_class = {
 };
 
 const FFOutputFormat ff_moq_muxer = {
-    .p.name             = "moq_hang",
+    .p.name             = "moq",
     .p.long_name        = NULL_IF_CONFIG_SMALL("MoQ ingestion protocol muxer"),
     .p.audio_codec      = AV_CODEC_ID_AAC,
     .p.video_codec      = AV_CODEC_ID_H264,
