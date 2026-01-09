@@ -193,7 +193,7 @@ static int moq_start(AVFormatContext *s)
     }
 
     if (moq->video_par) {
-	    moq->video = moq_publish_media_init(moq->broadcast, "avc3", strlen("avc3"), moq->video_par->extradata, moq->video_par->extradata_size);
+	    moq->video = moq_publish_media_ordered(moq->broadcast, "avc3", strlen("avc3"), moq->video_par->extradata, moq->video_par->extradata_size);
 
         if (moq->video < 0) {
             moq->state = MOQ_STATE_FAILED;
@@ -204,7 +204,7 @@ static int moq_start(AVFormatContext *s)
     }
 
     if (moq->audio_par) {
-	    moq->audio = moq_publish_media_init(moq->broadcast, "aac", strlen("aac"), moq->audio_par->extradata, moq->audio_par->extradata_size > 2 ? 2 : moq->audio_par->extradata_size);
+	    moq->audio = moq_publish_media_ordered(moq->broadcast, "aac", strlen("aac"), moq->audio_par->extradata, moq->audio_par->extradata_size > 2 ? 2 : moq->audio_par->extradata_size);
 
         if (moq->audio < 0) {
             moq->state = MOQ_STATE_FAILED;
